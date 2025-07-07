@@ -1,7 +1,7 @@
 use crate::magic_mount;
 use crate::module;
 use crate::supercall::fork_for_result;
-use crate::utils::{ensure_dir_exists, get_work_dir, switch_cgroups};
+use crate::utils::{ensure_dir_exists, get_work_dir, switch_cgroups, ensure_file_exists};
 use crate::{
     assets, defs, mount, restorecon, supercall,
     supercall::{init_load_package_uid_config, init_load_su_path, refresh_ap_package_list},
@@ -90,10 +90,15 @@ pub fn mount_systemlessly(module_dir: &str, is_img: bool) -> Result<()> {
         info!("- Preparing image");
 
         let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME);
+
+        if !tmp_module_path.exists(){
+            ensure_file_exists(&module_update_flag)?;
+        }
+        
         if module_update_flag.exists() {
             if tmp_module_path.exists() {
-                //if it have update,remove tmp file
-                std::fs::remove_file(tmp_module_path)?;
+                //if it has update, remove tmp file
+                fs::remove_file(tmp_module_path)?;
             }
             let total_size = calculate_total_size(Path::new(module_update_dir))?; //create modules adapt size
             info!(
@@ -115,7 +120,7 @@ pub fn mount_systemlessly(module_dir: &str, is_img: bool) -> Result<()> {
             ensure!(
                 result.status.success(),
                 "Failed to format ext4 image: {}",
-                String::from_utf8(result.stderr).unwrap()
+                String::from_utf8(result.stderr)?
             );
             info!("Checking Image");
             module::check_image(tmp_module_img)?;
@@ -206,7 +211,7 @@ pub fn systemless_bind_mount(_module_dir: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn calculate_total_size(path: &Path) -> std::io::Result<u64> {
+pub fn calculate_total_size(path: &Path) -> io::Result<u64> {
     let mut total_size = 0;
     if path.is_dir() {
         for entry in fs::read_dir(path)? {
@@ -242,7 +247,7 @@ pub fn move_file(module_update_dir: &str, module_dir: &str) -> Result<()> {
             rename(&source_path, &target_path)?;
         }
     }
-    return Ok(());
+    Ok(())
 }
 pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     utils::umask(0);
@@ -285,7 +290,7 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     }
     let logcat_path = format!("{}locat.log", defs::APATCH_LOG_FOLDER);
     let dmesg_path = format!("{}dmesg.log", defs::APATCH_LOG_FOLDER);
-    let bootlog = std::fs::File::create(dmesg_path)?;
+    let bootlog = fs::File::create(dmesg_path)?;
     args = vec![
         "-s",
         "9",
@@ -299,10 +304,10 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         "&",
     ];
     let _ = unsafe {
-        std::process::Command::new("timeout")
+        Command::new("timeout")
             .process_group(0)
             .pre_exec(|| {
-                utils::switch_cgroups();
+                switch_cgroups();
                 Ok(())
             })
             .args(args)
@@ -310,10 +315,10 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     };
     args = vec!["-s", "9", "120s", "dmesg", "-w"];
     let _result = unsafe {
-        std::process::Command::new("timeout")
+        Command::new("timeout")
             .process_group(0)
             .pre_exec(|| {
-                utils::switch_cgroups();
+                switch_cgroups();
                 Ok(())
             })
             .args(args)
@@ -339,28 +344,28 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         // we should still mount modules.img to `/data/adb/modules` in safe mode
         // becuase we may need to operate the module dir in safe mode
         warn!("safe mode, skip common post-fs-data.d scripts");
-        if let Err(e) = crate::module::disable_all_modules() {
+        if let Err(e) = module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
         }
     } else {
         // Then exec common post-fs-data scripts
-        if let Err(e) = crate::module::exec_common_scripts("post-fs-data.d", true) {
+        if let Err(e) = module::exec_common_scripts("post-fs-data.d", true) {
             warn!("exec common post-fs-data scripts failed: {}", e);
         }
     }
     let module_update_dir = defs::MODULE_UPDATE_TMP_DIR; //save module place
     let module_dir = defs::MODULE_DIR; // run modules place
-    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME); // if update ,there will be renew modules file
+    let module_update_flag = Path::new(defs::WORKING_DIR).join(defs::UPDATE_FILE_NAME); // if update ,there will be renewed modules file
     assets::ensure_binaries().with_context(|| "binary missing")?;
 
     ensure_dir_exists(defs::MODULE_UPDATE_TMP_DIR)?;
 
     move_file(module_update_dir, module_dir)?;
-    let lite_file = Path::new(defs::LITEMODE_FILE);
+    let is_lite_mode_enabled = Path::new(defs::LITEMODE_FILE).exists();
 
     if safe_mode {
         warn!("safe mode, skip post-fs-data scripts and disable all modules!");
-        if let Err(e) = crate::module::disable_all_modules() {
+        if let Err(e) = module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
         }
         return Ok(());
@@ -375,10 +380,10 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     }
 
     // load sepolicy.rule
-    if crate::module::load_sepolicy_rule().is_err() {
+    if module::load_sepolicy_rule().is_err() {
         warn!("load sepolicy.rule failed");
     }
-    if lite_file.exists() {
+    if is_lite_mode_enabled {
         info!("litemode runing skip mount tempfs")
     } else {
         if let Err(e) = mount::mount_tmpfs(utils::get_tmp_path()) {
@@ -388,19 +393,19 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
 
     // exec modules post-fs-data scripts
     // TODO: Add timeout
-    if let Err(e) = crate::module::exec_stage_script("post-fs-data", true) {
+    if let Err(e) = module::exec_stage_script("post-fs-data", true) {
         warn!("exec post-fs-data scripts failed: {}", e);
     }
 
     // load system.prop
-    if let Err(e) = crate::module::load_system_prop() {
+    if let Err(e) = module::load_system_prop() {
         warn!("load system.prop failed: {}", e);
     }
 
-    if lite_file.exists() {
+    if is_lite_mode_enabled {
         info!("litemode runing skip mount state")
     } else {
-        if utils::should_enable_overlay()? {
+        if utils::should_use_overlayfs()? {
             // mount module systemlessly by overlay
             let work_dir = get_work_dir();
             let tmp_dir = PathBuf::from(work_dir.clone());
@@ -469,16 +474,16 @@ fn run_stage(stage: &str, superkey: Option<String>, block: bool) {
 
     if utils::is_safe_mode(superkey) {
         warn!("safe mode, skip {stage} scripts");
-        if let Err(e) = crate::module::disable_all_modules() {
+        if let Err(e) = module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
         }
         return;
     }
 
-    if let Err(e) = crate::module::exec_common_scripts(&format!("{stage}.d"), block) {
+    if let Err(e) = module::exec_common_scripts(&format!("{stage}.d"), block) {
         warn!("Failed to exec common {stage} scripts: {e}");
     }
-    if let Err(e) = crate::module::exec_stage_script(stage, block) {
+    if let Err(e) = module::exec_stage_script(stage, block) {
         warn!("Failed to exec {stage} scripts: {e}");
     }
 }
@@ -564,7 +569,7 @@ pub fn start_uid_listener() -> Result<()> {
         } else if !debounce {
             thread::sleep(Duration::from_secs(1));
             debounce = true;
-            tx.send(true).unwrap();
+            tx.send(true)?;
         }
     }
 

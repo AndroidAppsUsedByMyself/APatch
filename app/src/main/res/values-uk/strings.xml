@@ -2,8 +2,8 @@
 <resources>
     <string name="app_name" translatable="false">APatch</string>
     <string name="home">Головна</string>
-    <string name="kernel_patch">Патч ядра</string>
-    <string name="android_patch">Патч для Android</string>
+    <string name="kernel_patch">Заплатка ядра</string>
+    <string name="android_patch">Заплатка для Android</string>
     <string name="reboot">Перезавантаження</string>
     <string name="settings">Налаштування</string>
     <string name="reboot_recovery">Перезавантаження в режим відновлення</string>
@@ -27,7 +27,7 @@
     <string name="home_su_path">Виконуваний файл su</string>
     <string name="home_auth_key_title">Введіть SuperKey</string>
     <string name="home_ap_cando_update">Оновити</string>
-    <string name="patch_title">Патч</string>
+    <string name="patch_title">Залатати</string>
     <string name="home_manager_version">Версія менеджера</string>
     <string name="home_fingerprint">Відбиток</string>
     <string name="home_selinux_status">Статус SELinux</string>
@@ -65,7 +65,7 @@
     <string name="home_auth_key_desc">Почати після сертифікації</string>
     <string name="home_ap_cando_uninstall">Видалити</string>
     <string name="home_ap_cando_install">Встановити</string>
-    <string name="home_kernel">Ядро</string>
+    <string name="home_kernel">Версія ядра</string>
     <string name="kpm_load_toast_succ">Встановленно успішно</string>
     <string name="home_selinux_status_unknown">Невідомо</string>
     <string name="kpm_unload">Видалити</string>
@@ -91,21 +91,21 @@
     <string name="apm_failed_to_disable">Не вдалося вимкнути модуль \"%s\"</string>
     <string name="settings_app_language">Мова</string>
     <string name="system_default">За замовчуванням у системі</string>
-    <string name="patch">Пропатчити</string>
+    <string name="patch">Залатати</string>
     <string name="settings_global_namespace_mode">Режим глобального простору імен</string>
     <string name="settings_global_namespace_mode_summary">Усі сеанси root використовують монтування глобального простору імен</string>
     <string name="kpatch_shadow_path_title">Kpatch</string>
     <string name="home_ap_cando_reboot">Перезавантаження</string>
-    <string name="patch_config_title">Патчі</string>
-    <string name="patch_mode_bootimg_patch">Режим: Патч</string>
-    <string name="patch_mode_patch_and_install">Режим: Пропатчити та встановити</string>
-    <string name="patch_mode_uninstall_patch">Режим: Скасування патчу</string>
+    <string name="patch_config_title">Латки</string>
+    <string name="patch_mode_bootimg_patch">Режим: Латка</string>
+    <string name="patch_mode_patch_and_install">Режим: Залатати та встановити</string>
+    <string name="patch_mode_uninstall_patch">Режим: Скасування латки</string>
     <string name="patch_select_bootimg_btn">Виберіть boot</string>
     <string name="patch_embed_kpm_btn">Вбудований KPM</string>
     <string name="patch_start_patch_btn">Старт</string>
-    <string name="patch_start_unpatch_btn">Скасування патчу</string>
+    <string name="patch_start_unpatch_btn">Скасування латки</string>
     <string name="patch_item_error">!!ПОМИЛКА!!</string>
-    <string name="patch_item_bootimg">boot img</string>
+    <string name="patch_item_bootimg">bootimg</string>
     <string name="patch_item_bootimg_slot">слот:</string>
     <string name="patch_item_bootimg_dev">пристрій:</string>
     <string name="patch_item_kernel">Ядро</string>
@@ -130,10 +130,10 @@
     <string name="settings_check_update_summary">Автоматично перевіряти оновлення при відкритті застосунку</string>
     <string name="success">Успішно</string>
     <string name="failure">Помилка</string>
-    <string name="settings_check_update">Перевірити оновлення</string>
+    <string name="settings_check_update">Перевірити наявність оновлень</string>
     <string name="settings_donot_store_superkey">Не зберігайте SuperKey локально</string>
     <string name="patch_mode_install_to_next_slot">Режим: встановлення в неактивний слот (після OTA)</string>
-    <string name="hide_apatch_manager_summary">Установіть нову програму менеджера з випадковим ідентифікатором і спеціальною міткою</string>
+    <string name="hide_apatch_manager_summary">Встановіть проксі-додаток із випадковим ідентифікатором пакета та власною міткою додатка</string>
     <string name="enable_web_debugging_summary">Можна використовувати для налагодження WebUI. Увімкніть лише за потреби.</string>
     <string name="home_new_apatch_found">Доступна нова версія %s, натисніть, щоб оновити.</string>
     <string name="home_install_unknown_summary">Натисніть щоб встановити</string>
@@ -159,7 +159,7 @@
     <string name="home_dialog_uninstall_title">Видалити</string>
     <string name="home_dialog_uninstall_ap_only">Видалити AndroidPatch</string>
     <string name="home_dialog_uninstall_all">Видалити все</string>
-    <string name="mode_select_page_select_file">Вибирати boot образ для патчу</string>
+    <string name="mode_select_page_select_file">Виберіть образ завантаження для патчу</string>
     <string name="mode_select_page_install_inactive_slot_warning">Ваш пристрій буде **ПРИМУШЕНО** завантажитися в поточний неактивний слот після перезавантаження!
 \nВикористовуйте цей параметр лише після завершення OTA.
 \nПродовжити?</string>
@@ -209,4 +209,8 @@
     <string name="crash_handle_title">Збій програми…</string>
     <string name="crash_handle_copied">Журнал збоїв скопійовано в буфер обміну.</string>
     <string name="crash_handle_copy">Копіювати журнал збоїв</string>
+    <string name="settings_lite_mode">Увімкнути спрощений режим</string>
+    <string name="settings_lite_mode_mode_summary">Функції APModule можуть бути пошкоджені після ввімкнення, але іноді це може ефективно уникнути виявлення. Потрібне перезавантаження.</string>
+    <string name="settings_force_overlayfs_mode">Примусове використання OverlayFS</string>
+    <string name="settings_force_overlayfs_mode_summary">Використовуйте OverlayFS для монтування APModules замість Magic Mount, якщо ядро підтримує цю функцію. Потрібне перезавантаження.</string>
 </resources>
