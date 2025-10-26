@@ -40,6 +40,7 @@ which = "8"
 getopts = "0.2"
 errno = "0.3.14"
 notify = "8.2"
+signal-hook = "0.3"
 
 [target.'cfg(any(target_os = "android", target_os = "linux"))'.dependencies]
 rustix = { git = "https://github.com/AndroidPatch/rustix", branch = "main", features = ["all-apis"] }
@@ -53,7 +54,8 @@ android_logger = { version = "0.15", default-features = false }
 
 [profile.release]
 strip = true
+overflow-checks = false
 opt-level = 3
 codegen-units = 1
 panic = "abort"
-lto = true
+lto = "fat"
