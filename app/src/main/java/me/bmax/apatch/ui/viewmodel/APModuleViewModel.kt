@@ -11,6 +11,7 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import me.bmax.apatch.apApp
+import me.bmax.apatch.util.HanziToPinyin
 import me.bmax.apatch.util.listModules
 import org.json.JSONArray
 import org.json.JSONObject
@@ -23,7 +24,7 @@ class APModuleViewModel : ViewModel() {
         private var modules by mutableStateOf<List<ModuleInfo>>(emptyList())
     }
 
-    class ModuleInfo(
+    data class ModuleInfo(
         val id: String,
         val name: String,
         val author: String,
@@ -36,6 +37,8 @@ class APModuleViewModel : ViewModel() {
         val updateJson: String,
         val hasWebUi: Boolean,
         val hasActionScript: Boolean,
+        val metamodule: Boolean,
+        val updateInfo: ModuleUpdateInfo? = null,
     )
 
     data class ModuleUpdateInfo(
@@ -45,12 +48,20 @@ class APModuleViewModel : ViewModel() {
         val changelog: String,
     )
 
+    var search by mutableStateOf("")
     var isRefreshing by mutableStateOf(false)
         private set
 
     val moduleList by derivedStateOf {
-        val comparator = compareBy(Collator.getInstance(Locale.getDefault()), ModuleInfo::id)
-        modules.sortedWith(comparator).also {
+        val collator = Collator.getInstance(Locale.getDefault())
+
+        val comparator = compareByDescending<ModuleInfo> { it.metamodule && it.enabled }
+            .thenBy(collator) { it.id }
+
+        modules.filter {
+            it.id.contains(search, true) || it.name.contains(search, true) || HanziToPinyin.getInstance()
+                .toPinyinString(it.name)?.contains(search, true) == true
+        }.sortedWith(comparator).also {
             isRefreshing = false
         }
     }
@@ -93,10 +104,19 @@ class APModuleViewModel : ViewModel() {
                             obj.getBoolean("update"),
                             obj.getBoolean("remove"),
                             obj.optString("updateJson"),
-                            obj.optBoolean("web"),
-                            obj.optBoolean("action")
+                            obj.getBooleanCompat("web"),
+                            obj.getBooleanCompat("action"),
+                            obj.getBooleanCompat("metamodule")
                         )
                     }.toList()
+                viewModelScope.launch(Dispatchers.IO) {
+                    val updatedModules = modules.map { module ->
+                        if (module.enabled && module.updateJson.isNotEmpty() && !module.update && !module.remove) {
+                            module.copy(updateInfo = runCatching { checkUpdate(module) }.getOrNull())
+                        } else module
+                    }
+                    modules = updatedModules
+                }
                 isNeedRefresh = false
             }.onFailure { e ->
                 Log.e(TAG, "fetchModuleList: ", e)
@@ -117,10 +137,9 @@ class APModuleViewModel : ViewModel() {
         return version.replace(Regex("[^a-zA-Z0-9.\\-_]"), "_")
     }
 
-    fun checkUpdate(m: ModuleInfo): Triple<String, String, String> {
-        val empty = Triple("", "", "")
+    fun checkUpdate(m: ModuleInfo): ModuleUpdateInfo? {
         if (m.updateJson.isEmpty() || m.remove || m.update || !m.enabled) {
-            return empty
+            return null
         }
         // download updateJson
         val result = kotlin.runCatching {
@@ -142,21 +161,31 @@ class APModuleViewModel : ViewModel() {
         Log.i(TAG, "checkUpdate result: $result")
 
         if (result.isEmpty()) {
-            return empty
+            return null
         }
 
         val updateJson = kotlin.runCatching {
             JSONObject(result)
-        }.getOrNull() ?: return empty
+        }.getOrNull() ?: return null
 
         val version = sanitizeVersionString(updateJson.optString("version", ""))
         val versionCode = updateJson.optInt("versionCode", 0)
         val zipUrl = updateJson.optString("zipUrl", "")
         val changelog = updateJson.optString("changelog", "")
         if (versionCode <= m.versionCode || zipUrl.isEmpty()) {
-            return empty
+            return null
         }
 
-        return Triple(zipUrl, version, changelog)
+        return ModuleUpdateInfo(version, versionCode, zipUrl, changelog)
+    }
+}
+
+private fun JSONObject.getBooleanCompat(key: String, default: Boolean = false): Boolean {
+    if (!has(key)) return default
+    return when (val value = opt(key)) {
+        is Boolean -> value
+        is String -> value.equals("true", ignoreCase = true) || value == "1"
+        is Number -> value.toInt() != 0
+        else -> default
     }
 }
