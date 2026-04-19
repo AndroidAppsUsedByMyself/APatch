@@ -53,6 +53,7 @@ val baseArgs = mutableListOf(
 ).apply { if (ccache != null) add("-DANDROID_CCACHE=$ccache") }
 
 android {
+    val appId = project.findProperty("APP_ID")?.toString() ?: "me.bmax.apatch"
     namespace = "me.bmax.apatch"
 
     buildTypes {
@@ -110,6 +111,7 @@ android {
         targetSdk = androidTargetSdkVersion
         versionCode = managerVersionCode
         versionName = managerVersionName
+        applicationId = appId
         ndk.abiFilters.addAll(arrayOf("arm64-v8a"))
         externalNativeBuild {
             cmake {
