@@ -218,14 +218,14 @@ fun downloadFile(url: String, destFile: File) {
 
 registerDownloadTask(
     taskName = "downloadKpimg",
-    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
+    srcUrl = "https://github.com/AndroidAppsUsedByMyself/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
     destPath = "${project.projectDir}/src/main/assets/kpimg",
     project = project
 )
 
 registerDownloadTask(
     taskName = "downloadKptools",
-    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/kptools-android",
+    srcUrl = "https://github.com/AndroidAppsUsedByMyself/KernelPatch/releases/download/$kernelPatchVersion/kptools-android",
     destPath = "${project.projectDir}/libs/arm64-v8a/libkptools.so",
     project = project
 )
@@ -234,7 +234,7 @@ registerDownloadTask(
 // TODO: Remove in future
 registerDownloadTask(
     taskName = "downloadCompatKpatch",
-    srcUrl = "https://github.com/bmax121/KernelPatch/releases/download/0.10.7/kpatch-android",
+    srcUrl = "https://github.com/AndroidAppsUsedByMyself/KernelPatch/releases/download/0.10.7/kpatch-android",
     destPath = "${project.projectDir}/libs/arm64-v8a/libkpatch.so",
     project = project
 )
