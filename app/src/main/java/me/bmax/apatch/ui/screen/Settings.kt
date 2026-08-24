@@ -3,6 +3,7 @@ package me.bmax.apatch.ui.screen
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -32,9 +33,11 @@ import androidx.compose.material.icons.filled.Commit
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeveloperMode
 import androidx.compose.material.icons.filled.Engineering
+import androidx.compose.material.icons.automirrored.filled.FeaturedPlayList
 import androidx.compose.material.icons.filled.FormatColorFill
 import androidx.compose.material.icons.filled.InvertColors
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material.icons.filled.Update
@@ -54,6 +57,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
@@ -69,7 +73,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
@@ -90,6 +93,8 @@ import me.bmax.apatch.ui.component.SwitchItem
 import me.bmax.apatch.ui.component.rememberLoadingDialog
 import me.bmax.apatch.ui.theme.refreshTheme
 import me.bmax.apatch.util.getBugreportFile
+import me.bmax.apatch.util.getKernelVersionCode
+import me.bmax.apatch.util.isGkiKernel
 import me.bmax.apatch.util.isGlobalNamespaceEnabled
 import me.bmax.apatch.util.outputStream
 import me.bmax.apatch.util.rootShellForResult
@@ -112,8 +117,16 @@ fun SettingScreen() {
     var isGlobalNamespaceEnabled by rememberSaveable {
         mutableStateOf(false)
     }
-    if (kPatchReady && aPatchReady) {
-        isGlobalNamespaceEnabled = isGlobalNamespaceEnabled()
+    var namespaceLoaded by remember { mutableStateOf(false) }
+    // The check shells out as root; run it once off the main thread instead of
+    // synchronously in composition on every recomposition. The switch stays
+    // disabled until the real value lands so a fast tap can't act on the
+    // placeholder and get overwritten by the late result.
+    LaunchedEffect(kPatchReady && aPatchReady) {
+        if (kPatchReady && aPatchReady) {
+            isGlobalNamespaceEnabled = withContext(Dispatchers.IO) { isGlobalNamespaceEnabled() }
+            namespaceLoaded = true
+        }
     }
 
     val snackBarHost = LocalSnackbarHost.current
@@ -183,6 +196,7 @@ fun SettingScreen() {
                     title = stringResource(id = R.string.settings_global_namespace_mode),
                     summary = stringResource(id = R.string.settings_global_namespace_mode_summary),
                     checked = isGlobalNamespaceEnabled,
+                    enabled = namespaceLoaded,
                     onCheckedChange = {
                         setGlobalNamespaceEnabled(
                             if (isGlobalNamespaceEnabled) {
@@ -193,6 +207,95 @@ fun SettingScreen() {
                         )
                         isGlobalNamespaceEnabled = it
                     })
+            }
+
+            // Legacy sucompat (path_probe) support
+            if (kPatchReady && aPatchReady) {
+                var sucompatEnabled by rememberSaveable {
+                    mutableStateOf(
+                        prefs.getBoolean("sucompat_enabled", false)
+                    )
+                }
+                SwitchItem(
+                    icon = Icons.AutoMirrored.Filled.FeaturedPlayList,
+                    title = stringResource(id = R.string.settings_sucompat),
+                    summary = stringResource(id = R.string.settings_sucompat_summary),
+                    checked = sucompatEnabled,
+                    onCheckedChange = { enabled ->
+                        scope.launch(Dispatchers.IO) {
+                            val result = if (enabled) {
+                                // Enable: create marker file and register hooks via supercall
+                                rootShellForResult("touch ${APApplication.SUCOMPAT_FILE}")
+                                Natives.controlFeature("sucompat_extra", true)
+                            } else {
+                                // Disable: remove marker file and unregister hooks via supercall
+                                rootShellForResult("rm -f ${APApplication.SUCOMPAT_FILE}")
+                                Natives.controlFeature("sucompat_extra", false)
+                            }
+                            Log.d("SucompatToggle", "sucompat_extra ${if (enabled) "enable" else "disable"} result: $result")
+                            if (result == 0L) {
+                                prefs.edit { putBoolean("sucompat_enabled", enabled) }
+                                sucompatEnabled = enabled
+                            }
+                        }
+                    })
+            }
+
+            // Hide SELinux modification (test)
+            if (kPatchReady && aPatchReady) {
+                val kernelVersion = remember { getKernelVersionCode() }
+                val kernelSupported = (kernelVersion ?: 0) >= 419
+                val isGki = remember { isGkiKernel() }
+                var selinuxHideEnabled by rememberSaveable {
+                    mutableStateOf(prefs.getBoolean("selinux_hide_enabled", false))
+                }
+                val showSelinuxHideWarning = remember { mutableStateOf(false) }
+
+                fun applySelinuxHide(enabled: Boolean) {
+                    scope.launch(Dispatchers.IO) {
+                        val command = if (enabled) {
+                            "touch ${APApplication.SELINUX_HIDE_FILE}"
+                        } else {
+                            "rm -f ${APApplication.SELINUX_HIDE_FILE}"
+                        }
+                        val result = rootShellForResult(command)
+                        Log.d("SelinuxHideToggle", "$command result: ${result.code}")
+                        if (result.isSuccess) {
+                            prefs.edit { putBoolean("selinux_hide_enabled", enabled) }
+                            selinuxHideEnabled = enabled
+                        }
+                    }
+                }
+
+                SwitchItem(
+                    icon = Icons.Filled.Security,
+                    title = stringResource(id = R.string.settings_selinux_hide),
+                    summary = stringResource(id = R.string.settings_selinux_hide_summary),
+                    checked = selinuxHideEnabled,
+                    enabled = kernelSupported,
+                    onCheckedChange = { enabled ->
+                        if (enabled) {
+                            // Only tested on 5.10+, and non-GKI carries a bigger risk, so warn first.
+                            val below510 = (kernelVersion ?: 0) < 510
+                            if (below510 || !isGki) {
+                                showSelinuxHideWarning.value = true
+                            } else {
+                                applySelinuxHide(true)
+                            }
+                        } else {
+                            applySelinuxHide(false)
+                        }
+                    }
+                )
+
+                if (showSelinuxHideWarning.value) {
+                    SelinuxHideWarningDialog(
+                        showDialog = showSelinuxHideWarning,
+                        kernelVersion = kernelVersion,
+                        isGki = isGki,
+                        onConfirm = { applySelinuxHide(true) },
+                    )
+                }
             }
 
             // WebView Debug
@@ -390,12 +493,7 @@ fun SettingScreen() {
                                     Text(
                                         text = stringResource(id = R.string.save_log),
                                         modifier = Modifier.padding(top = 16.dp),
-                                        textAlign = TextAlign.Center.also {
-                                            LineHeightStyle(
-                                                alignment = LineHeightStyle.Alignment.Center,
-                                                trim = LineHeightStyle.Trim.None
-                                            )
-                                        }
+                                        textAlign = TextAlign.Center
 
                                     )
                                 }
@@ -442,12 +540,7 @@ fun SettingScreen() {
                                     Text(
                                         text = stringResource(id = R.string.send_log),
                                         modifier = Modifier.padding(top = 16.dp),
-                                        textAlign = TextAlign.Center.also {
-                                            LineHeightStyle(
-                                                alignment = LineHeightStyle.Alignment.Center,
-                                                trim = LineHeightStyle.Trim.None
-                                            )
-                                        }
+                                        textAlign = TextAlign.Center
 
                                     )
                                 }
@@ -614,6 +707,84 @@ fun ResetSUPathDialog(showDialog: MutableState<Boolean>) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SelinuxHideWarningDialog(
+    showDialog: MutableState<Boolean>,
+    kernelVersion: Int?,
+    isGki: Boolean,
+    onConfirm: () -> Unit,
+) {
+    BasicAlertDialog(
+        onDismissRequest = { showDialog.value = false }, properties = DialogProperties(
+            decorFitsSystemWindows = true,
+            usePlatformDefaultWidth = false,
+        )
+    ) {
+        Surface(
+            modifier = Modifier
+                .width(310.dp)
+                .wrapContentHeight(),
+            shape = RoundedCornerShape(30.dp),
+            tonalElevation = AlertDialogDefaults.TonalElevation,
+            color = AlertDialogDefaults.containerColor,
+        ) {
+            Column(modifier = Modifier.padding(PaddingValues(all = 24.dp))) {
+                Box(
+                    Modifier
+                        .padding(PaddingValues(bottom = 16.dp))
+                        .align(Alignment.Start)
+                ) {
+                    Text(
+                        text = stringResource(id = R.string.settings_selinux_hide_warning_title),
+                        style = MaterialTheme.typography.headlineSmall
+                    )
+                }
+                if ((kernelVersion ?: 0) < 510) {
+                    Box(
+                        Modifier
+                            .padding(PaddingValues(bottom = 8.dp))
+                            .align(Alignment.Start)
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.settings_selinux_hide_warning_below_5_10),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+                if (!isGki) {
+                    Box(
+                        Modifier
+                            .padding(PaddingValues(bottom = 16.dp))
+                            .align(Alignment.Start)
+                    ) {
+                        Text(
+                            text = stringResource(id = R.string.settings_selinux_hide_warning_non_gki),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = { showDialog.value = false }) {
+                        Text(stringResource(id = android.R.string.cancel))
+                    }
+
+                    Button(onClick = {
+                        showDialog.value = false
+                        onConfirm()
+                    }) {
+                        Text(stringResource(id = android.R.string.ok))
+                    }
+                }
+            }
+            val dialogWindowProvider = LocalView.current.parent as DialogWindowProvider
+            APDialogBlurBehindUtils.setupWindowBlurListener(dialogWindowProvider.window)
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

@@ -1,10 +1,11 @@
-use crate::{defs, event, lua, module, module_config, supercall, utils};
+use crate::{defs, event, insmod, late_load, lua, magica, module, module_config, supercall, utils};
 #[cfg(target_os = "android")]
 use android_logger::Config;
 use anyhow::{Context, Result};
 use clap::Parser;
 #[cfg(target_os = "android")]
 use log::LevelFilter;
+use std::path::PathBuf;
 
 /// APatch cli
 #[derive(Parser, Debug)]
@@ -41,8 +42,44 @@ enum Commands {
     /// Start uid listener for synchronizing root list
     UidListener,
 
+    /// Load a kernel module (.ko) without version check (jailbreak mode)
+    Insmod {
+        /// kernel module path
+        module: PathBuf,
+        /// module load parameters (e.g. key=val key2=val2)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        params: Vec<String>,
+    },
+
+    /// Emulate system reboot (keep runtime-loaded modules active)
+    SoftReboot,
+
+    /// Jailbreak mode: load the KernelPatch module for this kernel and apply Magisk policy
+    LateLoad {
+        /// kernel module path (auto-detects KMI if omitted)
+        #[arg(long)]
+        module: Option<PathBuf>,
+        /// kernel KMI (e.g. android14-5.15), auto-detected if omitted
+        #[arg(long)]
+        kmi: Option<String>,
+        /// enable adb-root escalation on this tcp port, then run late-load via adb shell
+        #[arg(long)]
+        magica: Option<u16>,
+        /// restore adb properties after a magica jailbreak (used by the adb shell step)
+        #[arg(long)]
+        post_magica: bool,
+        /// manager package name to restart after a successful jailbreak
+        #[arg(long)]
+        package_name: Option<String>,
+    },
+
     /// Resetprop - Magisk-compatible system property tool
-    Resetprop(crate::resetprop::Args),
+    #[command(disable_help_flag = true)]
+    Resetprop {
+        /// Arguments passed to resetprop
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        args: Vec<String>,
+    },
 
     /// MagiskPolicy - SELinux Policy Patch Tool
     Sepolicy(crate::sepolicy::Args),
@@ -202,6 +239,27 @@ pub fn run() -> Result<()> {
 
         Commands::UidListener => event::start_uid_listener(),
 
+        Commands::Insmod { module, params } => insmod::insmod(&module, &params),
+
+        Commands::SoftReboot => event::soft_reboot(cli.superkey),
+
+        Commands::LateLoad {
+            module,
+            kmi,
+            magica,
+            post_magica,
+            package_name,
+        } => {
+            if let Some(port) = magica {
+                return magica::run(port, &module, &kmi, &package_name);
+            }
+            let result = late_load::run(module, kmi, package_name);
+            if post_magica && let Err(e) = magica::disable_adb_root() {
+                log::error!("disable adb root failed: {e:#}");
+            }
+            result
+        }
+
         Commands::Module { command } => {
             #[cfg(any(target_os = "linux", target_os = "android"))]
             {
@@ -312,14 +370,11 @@ pub fn run() -> Result<()> {
 
         Commands::Services => event::on_services(cli.superkey),
 
-        Commands::Resetprop(resetprop_args) => crate::resetprop::execute(&resetprop_args)
-            .inspect_err(|e| {
-                if e.downcast_ref::<crate::resetprop::WaitTimeoutError>()
-                    .is_some()
-                {
-                    std::process::exit(2);
-                }
-            }),
+        Commands::Resetprop { args } => {
+            let mut full_args = vec!["resetprop".to_string()];
+            full_args.extend(args);
+            crate::resetprop::resetprop_main(&full_args)
+        }
 
         Commands::Sepolicy(sepolicy_args) => crate::sepolicy::execute(&sepolicy_args),
     };

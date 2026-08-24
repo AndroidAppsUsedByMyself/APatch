@@ -25,11 +25,30 @@
     <string name="reboot_bootloader">Reboot to Bootloader</string>
     <string name="reboot_download">Reboot to Download</string>
     <string name="reboot_edl">Reboot to EDL</string>
+    <string name="reboot_download_confirm">Reboot into Download mode? The device will boot into the firmware flashing interface.</string>
+    <string name="reboot_edl_confirm">Reboot into EDL (Emergency Download) mode? The screen will stay black and the device can only be recovered with a deep flash tool.</string>
     <string name="about">About</string>
     <string name="settings_app_language">Language</string>
     <string name="system_default">System default</string>
     <string name="settings_global_namespace_mode">Global namespace mode</string>
     <string name="settings_global_namespace_mode_summary">All root sessions use the global mount namespace</string>
+    <string name="settings_sucompat">Legacy su compatibility</string>
+    <string name="settings_sucompat_summary">"Enable legacy su compatibility (for when su doesn't work)"</string>
+    <string name="settings_selinux_hide">Hide SELinux modification (Test)</string>
+    <string name="settings_selinux_hide_summary">"Hide SELinux changes from being detected by user processes (this feature may be unstable). Safe mode disables this feature."</string>
+    <string name="settings_selinux_hide_warning_title">Warning</string>
+    <string name="settings_selinux_hide_warning_below_5_10">"This feature is only tested on kernel 5.10 and above and may be unstable on lower kernel versions."</string>
+    <string name="settings_selinux_hide_warning_non_gki">"Non-GKI kernels carry a higher risk and may cause boot failure. Make sure your data is backed up."</string>
+    <string name="settings_jailbreak_mode">Jailbreak mode</string>
+    <string name="settings_jailbreak_mode_summary">"Load the KernelPatch module on a stock kernel. Patching is not allowed in this mode."</string>
+    <string name="settings_jailbreak_soft_reboot">Soft reboot</string>
+    <string name="settings_jailbreak_soft_reboot_message">"The module has been loaded. Restart the framework now?"</string>
+    <string name="settings_jailbreak_loaded">Jailbreak module loaded</string>
+    <string name="settings_jailbreak_failed">Failed to load jailbreak module</string>
+    <string name="jailbreak_no_patch">Patching is not allowed in jailbreak mode.</string>
+    <string name="jailbreak">Jailbreak</string>
+    <string name="jailbreak_triggered">Jailbreak triggered. Wait for root, then soft reboot.</string>
+    <string name="reboot_soft">Soft reboot</string>
     <string name="settings_clear_super_key_dialog">Do you really want to proceed?</string>
 
     <string name="settings_check_update">Check for updates</string>
@@ -59,8 +78,8 @@
     <string name="home_need_update">New version available</string>
     <string name="kpatch_version">Version: %s</string>
     <string name="apatch_version">Version: %s</string>
-    <string name="apatch_version_update">Version: %s -&gt; %s</string>
-    <string name="kpatch_version_update">Version: %s -&gt; %s</string>
+    <string name="apatch_version_update">Version: %1$s -&gt; %2$s</string>
+    <string name="kpatch_version_update">Version: %1$s -&gt; %2$s</string>
     <string name="kpatch_shadow_path_title">kpatch</string>
     <string name="home_kpatch_info_title">Info</string>
 
@@ -124,6 +143,7 @@
     <string name="kpm_add_kpm">Add KPM</string>
     <string name="kpm_load">Load</string>
     <string name="kpm_install">Install</string>
+    <string name="kpm_install_toast_succ">Installed successfully; takes effect after reboot</string>
     <string name="kpm_embed">Embed</string>
     <string name="kpm_load_toast_succ">Load succeed</string>
     <string name="kpm_load_toast_failed">Load failed</string>
@@ -136,6 +156,10 @@
     <string name="kpm_author">Author</string>
     <string name="kpm_desc">Desc</string>
     <string name="kpm_args">Args</string>
+    <string name="kpm_installed">Installed</string>
+    <string name="kpm_disabled">Disabled (takes effect after reboot)</string>
+    <string name="kpm_embedded">Embedded</string>
+    <string name="kpm_embedded_unload_invalid">Embedded KPMs cannot be unloaded; it will remain active after reboot.</string>
 
     <string name="su_title">Superuser</string>
     <string name="su_selinux_via_hook">Bypass via hook</string>
@@ -207,6 +231,7 @@
 
     <string name="home_dialog_uninstall_ap_only">Remove AndroidPatch</string>
     <string name="home_dialog_uninstall_all">Uninstall all</string>
+    <string name="home_dialog_uninstall_message">Remove AndroidPatch only removes the manager app and keeps the patched boot image. Uninstall all also restores the stock boot image, and the device will lose root until it is patched again.</string>
 
     <string name="kpm_control_dialog_title">Control KPModule</string>
     <string name="kpm_control_dialog_content">Input control parameters:</string>

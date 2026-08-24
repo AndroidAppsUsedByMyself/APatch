@@ -2,13 +2,11 @@ package me.bmax.apatch.util
 
 import android.content.ContentResolver
 import android.content.Context
-import android.content.pm.PackageManager
-import android.content.pm.Signature
+import android.content.Intent
 import android.database.Cursor
 import android.net.Uri
-import android.os.Build
 import android.provider.OpenableColumns
-import android.util.Base64
+import android.system.Os
 import android.util.Log
 import com.topjohnwu.superuser.CallbackList
 import com.topjohnwu.superuser.Shell
@@ -21,11 +19,7 @@ import me.bmax.apatch.BuildConfig
 import me.bmax.apatch.apApp
 import me.bmax.apatch.ui.screen.MODULE_TYPE
 import java.io.File
-import java.security.MessageDigest
-import java.security.cert.CertificateFactory
-import java.security.cert.X509Certificate
 import java.util.Properties
-import java.util.zip.ZipFile
 
 private const val TAG = "APatchCli"
 
@@ -105,8 +99,13 @@ private fun createMainRootShell() : Shell {
 }
 
 object APatchCli {
+    @Volatile
     var SHELL: Shell = createMainRootShell()
     val GLOBAL_MNT_SHELL: Shell = createRootShell(true)
+
+    // Serialized so a reader can never observe the half-reset MainShell (private
+    // fields cleared via reflection) between the reset and the SHELL swap.
+    @Synchronized
     fun refresh() {
         val tmp = SHELL
 
@@ -208,11 +207,19 @@ fun listModules(): String {
     val shell = getRootShell()
     val out =
         shell.newJob().add("${APApplication.APD_PATH} module list").to(ArrayList(), null).exec().out
-    withNewRootShell{
-       newJob().add("cp /data/user/*/me.bmax.apatch/patch/ori.img /data/adb/ap/ && rm /data/user/*/me.bmax.apatch/patch/ori.img")
-       .to(ArrayList(),null).exec()
-   }
     return out.joinToString("\n").ifBlank { "[]" }
+}
+
+// Devices patched via PATCH_ONLY and flashed manually (e.g. fastboot) never go
+// through the patch-completion handoff, so their stock boot backup is still in
+// the app-private patch dir. Move it next to apd once root is available;
+// idempotent and a no-op when nothing is pending.
+fun migrateStockBootBackup() {
+    withNewRootShell {
+        newJob().add(
+            "mkdir -p /data/adb/ap && cp /data/user/*/me.bmax.apatch/patch/ori.img /data/adb/ap/ 2>/dev/null && rm -f /data/user/*/me.bmax.apatch/patch/ori.img; true"
+        ).exec()
+    }
 }
 
 fun hasMetaModule(): Boolean {
@@ -228,7 +235,7 @@ fun getMetaModuleImplement(): String {
         }
 
         val prop = Properties()
-        prop.load(metaModuleProp.newInputStream())
+        metaModuleProp.newInputStream().use { prop.load(it) }
 
         val name = prop.getProperty("name")
         Log.i(TAG, "Meta module implement: $name")
@@ -268,42 +275,45 @@ fun installModule(
     uri: Uri, type: MODULE_TYPE, onFinish: (Boolean) -> Unit, onStdout: (String) -> Unit, onStderr: (String) -> Unit
 ): Boolean {
     val resolver = apApp.contentResolver
-    with(resolver.openInputStream(uri)) {
-        val file = File(apApp.cacheDir, "module_$type.zip")
+    val file = File(apApp.cacheDir, "module_$type.zip")
+    resolver.openInputStream(uri)?.use { input ->
         file.outputStream().use { output ->
-            this?.copyTo(output)
+            input.copyTo(output)
         }
-
-        val stdoutCallback: CallbackList<String?> = object : CallbackList<String?>() {
-            override fun onAddElement(s: String?) {
-                onStdout(s ?: "")
-            }
-        }
-
-        val stderrCallback: CallbackList<String?> = object : CallbackList<String?>() {
-            override fun onAddElement(s: String?) {
-                onStderr(s ?: "")
-            }
-        }
-
-        val shell = getRootShell()
-
-        var result = false
-        if(type == MODULE_TYPE.APM) {
-            val cmd = "${APApplication.APD_PATH} module install ${file.absolutePath}"
-            result = shell.newJob().add(cmd).to(stdoutCallback, stderrCallback)
-                    .exec().isSuccess
-        } else {
-//            ZipUtils.
-        }
-
-        Log.i(TAG, "install $type module $uri result: $result")
-
-        file.delete()
-
-        onFinish(result)
-        return result
+    } ?: run {
+        onFinish(false)
+        return false
     }
+
+    val stdoutCallback: CallbackList<String?> = object : CallbackList<String?>() {
+        override fun onAddElement(s: String?) {
+            onStdout(s ?: "")
+        }
+    }
+
+    val stderrCallback: CallbackList<String?> = object : CallbackList<String?>() {
+        override fun onAddElement(s: String?) {
+            onStderr(s ?: "")
+        }
+    }
+
+    val shell = getRootShell()
+
+    var result = false
+    if(type == MODULE_TYPE.APM) {
+        val cmd = "${APApplication.APD_PATH} module install ${file.absolutePath}"
+        result = shell.newJob().add(cmd).to(stdoutCallback, stderrCallback)
+                .exec().isSuccess
+    } else {
+//            ZipUtils.
+    }
+
+    Log.i(TAG, "install $type module $uri result: $result")
+
+    file.delete()
+
+    onFinish(result)
+    return result
 }
 
 fun runAPModuleAction(
@@ -331,12 +341,102 @@ fun runAPModuleAction(
 }
 
 fun reboot(reason: String = "") {
+    if (reason == "soft_reboot") {
+        softReboot()
+        return
+    }
     if (reason == "recovery") {
         // KEYCODE_POWER = 26, hide incorrect "Factory data reset" message
         getRootShell().newJob().add("/system/bin/input keyevent 26").exec()
     }
     getRootShell().newJob()
         .add("/system/bin/svc power reboot $reason || /system/bin/reboot $reason").exec()
+}
+
+/** Soft reboot: restart the Android framework while keeping runtime-loaded modules. */
+fun softReboot() {
+    getRootShell().newJob().add("${APApplication.APD_PATH} soft-reboot").exec()
+}
+
+/**
+ * Detect the Kernel Module Interface (KMI) of the running kernel, e.g.
+ * `android14-5.15`, from `uname -r` (same parsing as KernelSU).
+ */
+fun getKmi(): String? {
+    val release = runCatching { Os.uname().release }.getOrNull() ?: return null
+    val m = Regex("(.* )?(\\d+\\.\\d+)(\\S+)?(android\\d+)(.*)").find(release) ?: return null
+    return "${m.groupValues[4]}-${m.groupValues[2]}"
+}
+
+/** Asset name of the KernelPatch ko matching this device's kernel (KMI). */
+fun jailbreakAssetName(): String? {
+    val kmi = getKmi() ?: return null
+    return "${kmi}_kernelpatch.ko"
+}
+
+/**
+ * Running kernel version as a comparable integer, e.g. `4.19` -> 419,
+ * `5.10` -> 510, `6.1` -> 601. Returns null if it can't be parsed.
+ */
+fun getKernelVersionCode(): Int? {
+    val release = runCatching { Os.uname().release }.getOrNull() ?: return null
+    val m = Regex("^(\\d+)\\.(\\d+)").find(release) ?: return null
+    val major = m.groupValues[1].toIntOrNull() ?: return null
+    val minor = m.groupValues[2].toIntOrNull() ?: return null
+    return major * 100 + minor
+}
+
+/** Whether the running kernel is a GKI kernel (i.e. exposes `android<N>` in uname). */
+fun isGkiKernel(): Boolean = getKmi() != null
+
+/** Extract the bundled kernelpatch.ko for this device's kernel to the app files dir. */
+fun extractJailbreakKo(): File? {
+    val name = jailbreakAssetName() ?: return null
+    val file = File(apApp.filesDir, "kernelpatch.ko")
+    return runCatching {
+        apApp.assets.open(name).use { input ->
+            file.outputStream().use { output -> input.copyTo(output) }
+        }
+        file
+    }.getOrNull()
+}
+
+/**
+ * Install jailbreak mode: extract the bundled kernelpatch.ko for this kernel to
+ * the app files dir (no root needed), then trigger the magica chain via the
+ * isolated app-zygote service. The apd then escalates to full root through adb
+ * and runs `late-load` (loads the module, applies Magisk policy, marks jailbreak).
+ */
+fun installJailbreak(): Boolean {
+    val ko = extractJailbreakKo() ?: return false
+    if (!ko.exists() || ko.length() == 0L) {
+        Log.e(TAG, "extracted jailbreak ko is missing or empty")
+        return false
+    }
+    return try {
+        val intent = Intent(apApp, me.bmax.apatch.magica.MagicaService::class.java)
+        apApp.startService(intent)
+        Log.i(TAG, "MagicaService started for jailbreak")
+        true
+    } catch (e: Throwable) {
+        Log.e(TAG, "start MagicaService failed: $e")
+        false
+    }
+}
+
+/** Whether the SELinux mode is permissive (getenforce), the prerequisite for jailbreak. */
+fun isSELinuxPermissive(): Boolean {
+    Shell.Builder.create().build("sh").use { shell ->
+        val out = ArrayList<String>()
+        val result = shell.newJob().add("getenforce").to(out, ArrayList()).exec()
+        return result.isSuccess &&
+            out.firstOrNull()?.trim()?.equals("Permissive", ignoreCase = true) == true
+    }
+}
+
+/** Whether jailbreak mode is active (the ko has been loaded and a marker written). */
+fun isJailbreakMode(): Boolean {
+    return runCatching { SuFile(APApplication.JAILBREAK_FILE).exists() }.getOrDefault(false)
 }
 
 fun hasMagisk(): Boolean {
@@ -372,71 +472,3 @@ fun getFileNameFromUri(context: Context, uri: Uri): String? {
     return fileName
 }
 
-@Suppress("DEPRECATION")
-private fun signatureFromAPI(context: Context): ByteArray? {
-    return try {
-        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            context.packageManager.getPackageInfo(
-                context.packageName, PackageManager.GET_SIGNING_CERTIFICATES
-            )
-        } else {
-            context.packageManager.getPackageInfo(
-                context.packageName,
-                PackageManager.GET_SIGNATURES
-            )
-        }
-
-        val signatures: Array<out Signature>? =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                packageInfo.signingInfo?.apkContentsSigners
-            } else {
-                packageInfo.signatures
-            }
-
-        signatures?.firstOrNull()?.toByteArray()
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
-
-private fun signatureFromAPK(context: Context): ByteArray? {
-    var signatureBytes: ByteArray? = null
-    try {
-        ZipFile(context.packageResourcePath).use { zipFile ->
-            val entries = zipFile.entries()
-            while (entries.hasMoreElements() && signatureBytes == null) {
-                val entry = entries.nextElement()
-                if (entry.name.matches("(META-INF/.*)\\.(RSA|DSA|EC)".toRegex())) {
-                    zipFile.getInputStream(entry).use { inputStream ->
-                        val certFactory = CertificateFactory.getInstance("X509")
-                        val x509Cert =
-                            certFactory.generateCertificate(inputStream) as X509Certificate
-                        signatureBytes = x509Cert.encoded
-                    }
-                }
-            }
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-    }
-    return signatureBytes
-}
-
-private fun validateSignature(signatureBytes: ByteArray?, validSignature: String): Boolean {
-    signatureBytes ?: return false
-    val digest = MessageDigest.getInstance("SHA-256")
-    val signatureHash = Base64.encodeToString(digest.digest(signatureBytes), Base64.NO_WRAP)
-    return signatureHash == validSignature
-}
-
-fun verifyAppSignature(validSignature: String): Boolean {
-    val context = apApp.applicationContext
-    val apkSignature = signatureFromAPK(context)
-    val apiSignature = signatureFromAPI(context)
-
-    return validateSignature(apiSignature, validSignature) && validateSignature(
-        apkSignature,
-        validSignature
-    )
-}

@@ -58,7 +58,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -87,9 +86,11 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.bmax.apatch.R
 import me.bmax.apatch.ui.component.SwitchItem
+import me.bmax.apatch.ui.component.WarningCard
 import me.bmax.apatch.ui.viewmodel.KPModel
 import me.bmax.apatch.ui.viewmodel.PatchesViewModel
 import me.bmax.apatch.util.Version
+import me.bmax.apatch.util.isJailbreakMode
 import me.bmax.apatch.util.reboot
 import me.bmax.apatch.util.ui.APDialogBlurBehindUtils
 
@@ -98,13 +99,34 @@ private const val TAG = "Patches"
 @Destination<RootGraph>
 @Composable
 fun Patches(mode: PatchesViewModel.PatchMode) {
+    var jailbreakBlocked by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        jailbreakBlocked = withContext(Dispatchers.IO) { isJailbreakMode() }
+    }
+
+    if (jailbreakBlocked) {
+        Scaffold(topBar = { TopBar() }) { innerPadding ->
+            Box(
+                modifier = Modifier
+                    .padding(innerPadding)
+                    .padding(12.dp)
+            ) {
+                WarningCard(
+                    message = stringResource(R.string.jailbreak_no_patch),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+            }
+        }
+        return
+    }
+
     val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
     var needKey by rememberSaveable { mutableStateOf(false) }
 
     val viewModel = viewModel<PatchesViewModel>()
-    SideEffect {
+    LaunchedEffect(mode) {
         viewModel.prepare(mode)
     }
 
@@ -155,12 +177,17 @@ fun Patches(mode: PatchesViewModel.PatchMode) {
             ErrorView(viewModel.error)
             KernelPatchImageView(viewModel.kpimgInfo)
 
-            if (mode == PatchesViewModel.PatchMode.PATCH_ONLY && selectedBootImage != null && viewModel.kimgInfo.banner.isEmpty()) {
-                viewModel.copyAndParseBootimg(selectedBootImage!!)
-                // Fix endless loop. It's not normal if (parse done && working thread is not working) but banner still null
-                // Leave user re-choose
-                if (!viewModel.running && viewModel.kimgInfo.banner.isEmpty()) {
-                    selectedBootImage = null
+            // Consume a boot image chosen on the install-mode screen exactly once;
+            // calling copyAndParseBootimg in composition refires per recomposition.
+            LaunchedEffect(selectedBootImage) {
+                val bootImage = selectedBootImage
+                if (mode == PatchesViewModel.PatchMode.PATCH_ONLY && bootImage != null && viewModel.kimgInfo.banner.isEmpty()) {
+                    viewModel.copyAndParseBootimg(bootImage)
+                    // Fix endless loop. It's not normal if (parse done && working thread is not working) but banner still null
+                    // Leave user re-choose
+                    if (!viewModel.running && viewModel.kimgInfo.banner.isEmpty()) {
+                        selectedBootImage = null
+                    }
                 }
             }
 

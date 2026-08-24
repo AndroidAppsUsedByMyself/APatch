@@ -22,7 +22,7 @@
     <string name="about">Sobre</string>
     <string name="home_learn_apatch">Saiba mais sobre o APatch</string>
     <string name="home_click_to_learn_apatch">Conheça os recursos do APatch e como usá-lo</string>
-    <string name="about_source_code"><![CDATA[<p>Veja o código-fonte no %1$s<p/>Participe do nosso canal do %2$s<p/>Participe do nosso grupo do %3$s]]></string>
+    <string name="about_source_code">&lt;p&gt;Veja o código-fonte no %1$s&lt;p/&gt;Participe do nosso canal do %2$s&lt;p/&gt;Participe do nosso grupo do %3$s</string>
     <string name="send_log">Reportar registros</string>
     <string name="safe_mode">Modo de segurança</string>
     <string name="super_key">SuperKey</string>
@@ -38,10 +38,8 @@
     <string name="kpatch_version">Versão: %s</string>
     <string name="apatch_version">Versão: %s</string>
     <string name="home_su_path">Su executável</string>
-    <string name="apatch_version_update">Versão: %s -&gt; %s</string>
+    <string name="apatch_version_update">Versão: %1$s -&gt; %2$s</string>
     <string name="home_apatch_version">Versão do APatch</string>
-    <string name="home_auth_key_title">Inserir SuperKey</string>
-    <string name="home_auth_key_desc">Iniciar após a certificação</string>
     <string name="home_ap_cando_install">Instalar</string>
     <string name="home_ap_cando_update">Atualizar</string>
     <string name="home_ap_cando_uninstall">Desinstalar</string>
@@ -87,14 +85,13 @@
     <string name="apm_downloading">Baixando módulo %s</string>
     <string name="apm_start_downloading">Começando a baixar %s</string>
     <string name="apm_new_version_available">Nova versão %s está disponível, clique para atualizar.</string>
-    <string name="clear_super_key">Limpar SuperKey</string>
     <string name="apm_not_installed">AndroidPatch não instalado</string>
     <string name="settings_app_language">Idioma</string>
     <string name="system_default">Padrão do sistema</string>
     <string name="patch">Patch</string>
     <string name="settings_global_namespace_mode">Modo de namespace global</string>
     <string name="settings_global_namespace_mode_summary">Todas as sessões root usam o namespace de montagem global</string>
-    <string name="kpatch_version_update">Versão: %s -&gt; %s</string>
+    <string name="kpatch_version_update">Versão: %1$s -&gt; %2$s</string>
     <string name="kpatch_shadow_path_title">kpatch</string>
     <string name="home_kpatch_info_title">Informações</string>
     <string name="home_ap_cando_reboot">Reiniciar</string>
@@ -121,7 +118,7 @@
     <string name="patch_mode_bootimg_patch">Modo: Patch</string>
     <string name="patch_mode_patch_and_install">Modo: Patch e instalação</string>
     <string name="patch_mode_uninstall_patch">Modo: Desinstalar KPatch</string>
-    <string name="patch_start_unpatch_btn">UnPatch</string>
+    <string name="patch_start_unpatch_btn">Desfazer patch</string>
     <string name="patch_item_extra_args">Argumentos:</string>
     <string name="patch_item_extra_event">Evento:</string>
     <string name="patch_item_skey">SuperKey</string>
@@ -145,18 +142,14 @@
     <string name="mode_select_page_install_inactive_slot_warning">Seu dispositivo será **FORÇADO** a inicializar no slot inativo atual após uma reinicialização!
 \nSó use esta opção após a conclusão do OTA.
 \nDeseja continuar?</string>
-    <string name="home_dialog_auth_fail_title">Falha na autenticação</string>
     <string name="mode_select_page_select_file">Selecionar imagem boot para patch</string>
     <string name="mode_select_page_title">Instalar</string>
     <string name="mode_select_page_patch_and_install">Patch e instalação</string>
-    <string name="home_dialog_auth_fail_content">Não foi possível autenticar a SuperKey, portanto o APatch não pode funcionar corretamente. \nAqui estão alguns possíveis motivos para a falha de autenticação:\n1. Você não fez patch do boot.img com KernelPatch.\n2. O boot.img corrigido não foi flashado.\n3. A SuperKey está incorreta ou contém caracteres especiais.\n4. Seu dispositivo não oferece suporte ao APatch e KernelPatch.\n\nPor favor, verifique e tente novamente. Se ainda houver problemas, você pode fazer perguntas na página de problemas do repositório oficial.</string>
     <string name="home_more_menu_feedback_or_suggestion">Feedback ou sugestão</string>
     <string name="home_more_menu_about">Sobre</string>
     <string name="apm_webui_open">Abrir</string>
     <string name="enable_web_debugging">Ativar depuração do WebView</string>
-    <string name="settings_donot_store_superkey_summary">Autentique a SuperKey sempre que o gerenciador iniciar</string>
     <string name="enable_web_debugging_summary">Pode ser usado para depurar o WebUI. Por favor, ative somente quando necessário.</string>
-    <string name="settings_donot_store_superkey">Não armazenar a SuperKey no local</string>
     <string name="home_new_apatch_found">Nova versão %s está disponível, clique para atualizar.</string>
     <string name="patch_mode_install_to_next_slot">Modo: Instalar no slot inativo (Após o OTA)</string>
     <string name="home_device_info">Dispositivo</string>
@@ -209,8 +202,44 @@
     <string name="crash_handle_title">O app travou…</string>
     <string name="crash_handle_copy">Copiar registro de falhas</string>
     <string name="log_saved">Registros salvos</string>
-    <string name="settings_lite_mode">Ativar Modo lite</string>
-    <string name="settings_lite_mode_mode_summary">As funções do APMódulo podem apresentar falhas após serem ativadas, mas em alguns casos ainda podem evitar a detecção. Reinicialização necessária.</string>
-    <string name="settings_force_overlayfs_mode_summary">Use OverlayFS para montar os APMódulos em vez do Magic Mount, quando houver suporte no kernel. Reinicialização necessária.</string>
-    <string name="settings_force_overlayfs_mode">Forçar o uso do OverlayFS</string>
+    <string name="about_github" translatable="false">GitHub</string>
+    <string name="about_weblate" translatable="false">Weblate</string>
+    <string name="apm_module_undo_uninstall_failed">Não foi possível desfazer a desinstalação: %s</string>
+    <string name="apm_module_undo_uninstall_success">Desinstalação de %s cancelada com sucesso</string>
+    <string name="apm_undo">Desfazer</string>
+    <string name="back">Voltar</string>
+    <string name="learn_more">Saiba mais</string>
+    <string name="meta_module_disabled">módulo não montado, porque o metamódulo está desativado</string>
+    <string name="meta_module_removed">módulo não montado, porque o metamódulo está sendo excluído</string>
+    <string name="metamodule_uninstall_confirm">&quot;Tem certeza de que deseja desinstalar o módulo %s? Esta ação afetará todos os módulos, e alguns recursos fornecidos pelo metamódulo (como a montagem) não funcionarão mais.  &quot;</string>
+    <string name="no_meta_module_installed">módulo não montado, porque o metamódulo não está instalado</string>
+    <string name="patch_custom_superkey">SuperKey personalizada</string>
+    <string name="patch_custom_superkey_summary">ainda é possível usar o root do gerenciador superkey; agora verificamos a assinatura do gerenciador pelo kernel</string>
+    <string name="search">Pesquisar</string>
+    <string name="search_apps">Pesquisar apps</string>
+    <string name="search_modules">Pesquisar módulos</string>
+    <string name="settings_sucompat">Compatibilidade su legada</string>
+    <string name="settings_sucompat_summary">Ativar compatibilidade su (para quando su não funciona)</string>
+    <string name="settings_selinux_hide">Ocultar modificação do SELinux (Teste)</string>
+    <string name="settings_selinux_hide_summary">Oculta as alterações do SELinux para não serem detectadas por processos do usuário (este recurso pode ser instável). O modo de segurança pode desativar este recurso.</string>
+    <string name="settings_selinux_hide_warning_title">Aviso</string>
+    <string name="settings_selinux_hide_warning_below_5_10">Este recurso só foi testado em kernels 5.10 ou superiores e pode ser instável em versões inferiores.</string>
+    <string name="settings_selinux_hide_warning_non_gki">Kernels não-GKI apresentam um risco maior e podem causar falha na inicialização. Certifique-se de que seus dados estão com backup.</string>
+    <string name="warning_of_meta_module_summary">Este módulo quer montar /system; o módulo meta vai cuidar disso. Caso contrário, pode não funcionar.</string>
+    <string name="warning_of_meta_module_title">Requer módulo Meta</string>
+    <string name="settings_jailbreak_mode">Modo jailbreak</string>
+    <string name="settings_jailbreak_mode_summary">Carrega o módulo KernelPatch em um kernel original. Não é permitido fazer patch neste modo.</string>
+    <string name="settings_jailbreak_soft_reboot">Reinicialização suave</string>
+    <string name="settings_jailbreak_soft_reboot_message">O módulo foi carregado. Reiniciar o sistema agora?</string>
+    <string name="settings_jailbreak_loaded">Módulo de jailbreak carregado</string>
+    <string name="settings_jailbreak_failed">Falha ao carregar o módulo de jailbreak</string>
+    <string name="jailbreak_no_patch">Não é permitido fazer patch no modo jailbreak.</string>
+    <string name="jailbreak">Jailbreak</string>
+    <string name="jailbreak_triggered">Jailbreak acionado. Aguarde o root e, em seguida, reinicie em modo suave.</string>
+    <string name="reboot_soft">Reinicialização suave</string>
+    <string name="kpm_installed">Instalado</string>
+    <string name="kpm_disabled">Desativado (entra em vigor após reiniciar)</string>
+    <string name="kpm_embedded">Embutido</string>
+    <string name="kpm_embedded_unload_invalid">Não é possível descarregar KPMs embutidos; eles continuarão ativos após reiniciar.</string>
+    <string name="kpm_install_toast_succ">Instalado com sucesso; entra em vigor após reiniciar</string>
 </resources>

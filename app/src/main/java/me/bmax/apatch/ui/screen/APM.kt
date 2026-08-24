@@ -103,6 +103,7 @@ import me.bmax.apatch.ui.viewmodel.APModuleViewModel
 import me.bmax.apatch.util.DownloadListener
 import me.bmax.apatch.util.download
 import me.bmax.apatch.util.hasMagisk
+import me.bmax.apatch.util.isJailbreakMode
 import me.bmax.apatch.util.reboot
 import me.bmax.apatch.util.toggleModule
 import me.bmax.apatch.util.ui.LocalSnackbarHost
@@ -148,10 +149,8 @@ fun APModuleScreen(navigator: DestinationsNavigator) {
     ) { viewModel.fetchModuleList() }
     val scrollBehavior = pinnedScrollBehavior()
 
-    //TODO: FIXME -> val isSafeMode = Natives.getSafeMode()
-    val isSafeMode = false
     val hasMagisk = hasMagisk()
-    val hideInstallButton = isSafeMode || hasMagisk
+    val hideInstallButton = hasMagisk
 
     val moduleListState = rememberLazyListState()
 
@@ -524,13 +523,17 @@ private fun ModuleList(
                                         isChecked = it
                                         viewModel.fetchModuleList()
 
-                                        val result = snackBarHost.showSnackbar(
-                                            message = rebootToApply,
-                                            actionLabel = reboot,
-                                            duration = SnackbarDuration.Long
-                                        )
-                                        if (result == SnackbarResult.ActionPerformed) {
-                                            reboot()
+                                        // In jailbreak mode a full reboot would unload the
+                                        // runtime-loaded module, so apply without the prompt.
+                                        if (!withContext(Dispatchers.IO) { isJailbreakMode() }) {
+                                            val result = snackBarHost.showSnackbar(
+                                                message = rebootToApply,
+                                                actionLabel = reboot,
+                                                duration = SnackbarDuration.Long
+                                            )
+                                            if (result == SnackbarResult.ActionPerformed) {
+                                                reboot()
+                                            }
                                         }
                                     } else {
                                         val message = if (isChecked) failedDisable else failedEnable

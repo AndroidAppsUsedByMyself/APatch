@@ -7,6 +7,8 @@
 
 #include <cstring>
 #include <vector>
+#include <unistd.h>
+#include <sys/wait.h>
 
 #include "apjni.hpp"
 #include "supercall.h"
@@ -157,6 +159,20 @@ jobject nativeControlKernelPatchModule(JNIEnv *env, jobject /* this */, jstring 
     return obj;
 }
 
+jlong nativeControlFeature(JNIEnv *env, jobject /* this */, jstring super_key_jstr, jstring feature_name_jstr, jint state) {
+    ensureSuperKeyNonNull(super_key_jstr);
+
+    const auto super_key = JUTFString(env, super_key_jstr);
+    const auto feature_name = JUTFString(env, feature_name_jstr);
+
+    long rc = sc_control_feature(super_key.get(), feature_name.get(), (int)state);
+    if (rc < 0) [[unlikely]] {
+        LOGE("nativeControlFeature error: %ld", rc);
+    }
+
+    return rc;
+}
+
 jlong nativeUnloadKernelPatchModule(JNIEnv *env, jobject /* this */, jstring super_key_jstr, jstring module_name_jstr) {
     ensureSuperKeyNonNull(super_key_jstr);
 
@@ -251,6 +267,42 @@ jboolean nativeResetSuPath(JNIEnv *env, jobject /* this */, jstring super_key_js
     return sc_su_reset_path(super_key.get(), su_path.get()) == 0;
 }
 
+void nativeForkDontCareAndExecApd(JNIEnv *env, jclass /* this */, jstring apd_path_jstr, jstring module_path_jstr, jstring pkg_jstr) {
+    const auto apd_path = JUTFString(env, apd_path_jstr);
+    const auto module_path = JUTFString(env, module_path_jstr);
+    const auto pkg = JUTFString(env, pkg_jstr);
+
+    int pid = fork();
+    if (pid < 0) {
+        LOGE("fork");
+        return;
+    } else if (pid > 0) {
+        int status = 0;
+        if (TEMP_FAILURE_RETRY(waitpid(pid, &status, 0)) < 0) {
+            LOGE("waitpid");
+        }
+        return;
+    }
+
+    if (setuid(0) != 0) {
+        LOGE("setuid");
+        _exit(1);
+    }
+
+    pid = fork();
+    if (pid < 0) {
+        LOGE("fork 2");
+        _exit(1);
+    } else if (pid > 0) {
+        _exit(0);
+    }
+
+    execl(apd_path.get(), "apd", "late-load", "--magica", "5555", "--module", module_path.get(),
+          "--package-name", pkg.get(), (char *)nullptr);
+    LOGE("exec magica");
+    _exit(1);
+}
+
 JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void * /*reserved*/) {
     LOGI("Enter OnLoad");
 
@@ -285,13 +337,26 @@ JNIEXPORT jint JNI_OnLoad(JavaVM* vm, void * /*reserved*/) {
         {"nativeRevokeSu", "(Ljava/lang/String;I)J", reinterpret_cast<void *>(&nativeRevokeSu)},
         {"nativeSuPath", "(Ljava/lang/String;)Ljava/lang/String;", reinterpret_cast<void *>(&nativeSuPath)},
         {"nativeResetSuPath", "(Ljava/lang/String;Ljava/lang/String;)Z", reinterpret_cast<void *>(&nativeResetSuPath)},
+        {"nativeControlFeature", "(Ljava/lang/String;Ljava/lang/String;I)J", reinterpret_cast<void *>(&nativeControlFeature)},
     };
 
     if (JNI_RegisterNatives(env, clazz, gMethods, sizeof(gMethods) / sizeof(gMethods[0])) < 0) [[unlikely]] {
         LOGE("Failed to register native methods");
         return JNI_FALSE;
     }
-    
+
+    auto magicaClazz = JNI_FindClass(env, "me/bmax/apatch/magica/AppZygotePreload");
+    if (magicaClazz.get() != nullptr) {
+        const static JNINativeMethod magicaMethods[] = {
+            {"forkDontCareAndExecApd", "(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V", reinterpret_cast<void *>(&nativeForkDontCareAndExecApd)},
+        };
+        if (JNI_RegisterNatives(env, magicaClazz, magicaMethods, sizeof(magicaMethods) / sizeof(magicaMethods[0])) < 0) [[unlikely]] {
+            LOGE("Failed to register magica native methods");
+        }
+    } else {
+        LOGE("Failed to find AppZygotePreload class");
+    }
+
     LOGI("JNI_OnLoad Done!");
     return JNI_VERSION_1_6;
 }

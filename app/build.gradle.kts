@@ -1,6 +1,6 @@
 @file:Suppress("UnstableApiUsage")
 
-import com.android.build.gradle.tasks.PackageAndroidArtifact
+import com.android.build.gradle.tasks.PackageApplication
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import java.net.URI
 
@@ -13,17 +13,15 @@ plugins {
     id("kotlin-parcelize")
 }
 
-val androidCompileSdkVersion: Int by rootProject.extra
-val androidCompileNdkVersion: String by rootProject.extra
-val androidBuildToolsVersion: String by rootProject.extra
-val androidMinSdkVersion: Int by rootProject.extra
-val androidTargetSdkVersion: Int by rootProject.extra
-val androidSourceCompatibility: JavaVersion by rootProject.extra
-val androidTargetCompatibility: JavaVersion by rootProject.extra
-val managerVersionCode: Int by rootProject.extra
-val managerVersionName: String by rootProject.extra
-val branchName: String by rootProject.extra
-val kernelPatchVersion: String by rootProject.extra
+val androidCompileSdkVersion: Int = rootProject.extra["androidCompileSdkVersion"] as Int
+val androidCompileNdkVersion: String = rootProject.extra["androidCompileNdkVersion"] as String
+val androidBuildToolsVersion: String = rootProject.extra["androidBuildToolsVersion"] as String
+val androidMinSdkVersion: Int = rootProject.extra["androidMinSdkVersion"] as Int
+val androidTargetSdkVersion: Int = rootProject.extra["androidTargetSdkVersion"] as Int
+val managerVersionCode: Int = rootProject.extra["managerVersionCode"] as Int
+val managerVersionName: String = rootProject.extra["managerVersionName"] as String
+val branchName: String = rootProject.extra["branchName"] as String
+val kernelPatchVersion: String = rootProject.extra["kernelPatchVersion"] as String
 
 apksign {
     storeFileProperty = "KEYSTORE_FILE"
@@ -167,7 +165,7 @@ android {
 }
 
 // https://stackoverflow.com/a/77745844
-tasks.withType<PackageAndroidArtifact> {
+tasks.withType<PackageApplication> {
     doFirst { appMetadata.asFile.orNull?.writeText("") }
 }
 
@@ -216,6 +214,29 @@ fun downloadFile(url: String, destFile: File) {
     }
 }
 
+/** Download with connect/read timeouts and retries (robust against flaky networks). */
+fun downloadFileRetry(url: String, destFile: File, maxRetries: Int = 5) {
+    var attempt = 0
+    while (true) {
+        try {
+            val conn = URI.create(url).toURL().openConnection()
+            conn.connectTimeout = 15000
+            conn.readTimeout = 60000
+            conn.getInputStream().use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            return
+        } catch (e: Exception) {
+            attempt++
+            if (attempt >= maxRetries) throw e
+            println(" - download attempt $attempt/$maxRetries failed for $url: ${e.message}")
+            Thread.sleep(2000L * attempt)
+        }
+    }
+}
+
 registerDownloadTask(
     taskName = "downloadKpimg",
     srcUrl = "https://github.com/AndroidAppsUsedByMyself/KernelPatch/releases/download/$kernelPatchVersion/kpimg-android",
@@ -239,6 +260,31 @@ registerDownloadTask(
     project = project
 )
 
+// Jailbreak mode: download KernelPatch ko for every supported kernel KMI and
+// package them into the APK assets so the app can load the matching one.
+val jailbreakKmis = listOf(
+    "android12-5.10", "android13-5.10", "android13-5.15",
+    "android14-5.15", "android14-6.1", "android15-6.6", "android16-6.12",
+)
+
+tasks.register("downloadJailbreakKo") {
+    doLast {
+        val assetsDir = File("${project.projectDir}/src/main/assets")
+        assetsDir.mkdirs()
+        jailbreakKmis.forEach { kmi ->
+            val srcUrl =
+                "https://github.com/bmax121/KernelPatch/releases/download/$kernelPatchVersion/${kmi}_kernelpatch.ko"
+            val destFile = File(assetsDir, "${kmi}_kernelpatch.ko")
+            if (!destFile.exists()) {
+                println(" - Downloading $srcUrl to ${destFile.absolutePath}")
+                downloadFileRetry(srcUrl, destFile)
+            } else {
+                println(" - $kmi kernelpatch.ko already present.")
+            }
+        }
+    }
+}
+
 tasks.register<Copy>("mergeScripts") {
     into("${project.projectDir}/src/main/resources/META-INF/com/google/android")
     from(rootProject.file("${project.rootDir}/scripts/update_binary.sh")) {
@@ -253,6 +299,7 @@ tasks.getByName("preBuild").dependsOn(
     "downloadKpimg",
     "downloadKptools",
     "downloadCompatKpatch",
+    "downloadJailbreakKo",
     "mergeScripts",
 )
 
@@ -326,15 +373,11 @@ dependencies {
 
     implementation(libs.dev.rikka.rikkax.parcelablelist)
 
-    implementation(libs.io.coil.kt.coil.compose)
+    implementation(libs.io.coil.kt.coil3.coil.compose)
 
     implementation(libs.kotlinx.coroutines.core)
 
-    implementation(libs.me.zhanghai.android.appiconloader.coil)
-
-    implementation(libs.sheet.compose.dialogs.core)
-    implementation(libs.sheet.compose.dialogs.list)
-    implementation(libs.sheet.compose.dialogs.input)
+    implementation(libs.okhttp)
 
     implementation(libs.markdown)
 

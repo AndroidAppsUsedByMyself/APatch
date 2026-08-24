@@ -2,6 +2,7 @@ package me.bmax.apatch.ui.screen
 
 import android.os.Build
 import android.system.Os
+import android.widget.Toast
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
@@ -27,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.InstallMobile
+import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Warning
@@ -39,6 +41,7 @@ import androidx.compose.material.icons.outlined.SystemUpdate
 import androidx.compose.material3.AlertDialogDefaults
 import androidx.compose.material3.BasicAlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -53,16 +56,19 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.livedata.observeAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
@@ -77,6 +83,7 @@ import com.ramcosta.composedestinations.generated.destinations.InstallModeSelect
 import com.ramcosta.composedestinations.generated.destinations.PatchesDestination
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import me.bmax.apatch.APApplication
 import me.bmax.apatch.Natives
@@ -91,7 +98,12 @@ import me.bmax.apatch.util.Version
 import me.bmax.apatch.util.Version.getManagerVersion
 import me.bmax.apatch.util.checkNewVersion
 import me.bmax.apatch.util.getSELinuxStatus
+import me.bmax.apatch.util.installJailbreak
+import me.bmax.apatch.util.isJailbreakMode
+import me.bmax.apatch.util.isSELinuxPermissive
+import me.bmax.apatch.util.migrateStockBootBackup
 import me.bmax.apatch.util.reboot
+import me.bmax.apatch.util.softReboot
 import me.bmax.apatch.util.ui.APDialogBlurBehindUtils
 
 private val managerVersion = getManagerVersion()
@@ -101,6 +113,12 @@ private val managerVersion = getManagerVersion()
 fun HomeScreen(navigator: DestinationsNavigator) {
     val kpState by APApplication.kpStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
     val apState by APApplication.apStateLiveData.observeAsState(APApplication.State.UNKNOWN_STATE)
+
+    // Pick up a stock boot backup left behind by a manually flashed PATCH_ONLY
+    // install; see migrateStockBootBackup.
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { migrateStockBootBackup() }
+    }
 
     Scaffold(topBar = {
         TopBar(onInstallClick = dropUnlessResumed {
@@ -120,7 +138,16 @@ fun HomeScreen(navigator: DestinationsNavigator) {
             if (kpState != APApplication.State.UNKNOWN_STATE && apState != APApplication.State.ANDROIDPATCH_INSTALLED) {
                 AStatusCard(apState)
             }
-            val checkUpdate = APApplication.sharedPreferences.getBoolean("check_update", true)
+            val prefs = APApplication.sharedPreferences
+            val checkUpdate by produceState(initialValue = prefs.getBoolean("check_update", true)) {
+                val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { p, key ->
+                    if (key == "check_update") {
+                        value = p.getBoolean(key, true)
+                    }
+                }
+                prefs.registerOnSharedPreferenceChangeListener(listener)
+                awaitDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+            }
             if (checkUpdate) {
                 UpdateCard()
             }
@@ -159,23 +186,40 @@ fun UninstallDialog(showDialog: MutableState<Boolean>, navigator: DestinationsNa
                         style = MaterialTheme.typography.headlineSmall
                     )
                 }
+                Text(
+                    text = stringResource(id = R.string.home_dialog_uninstall_message),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(PaddingValues(bottom = 24.dp))
+                )
                 Row(
-                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center
+                    modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End
                 ) {
+                    TextButton(onClick = { showDialog.value = false }) {
+                        Text(text = stringResource(id = android.R.string.cancel))
+                    }
+
                     TextButton(onClick = {
                         showDialog.value = false
                         APApplication.uninstallApatch()
                     }) {
                         Text(text = stringResource(id = R.string.home_dialog_uninstall_ap_only))
                     }
-
-                    TextButton(onClick = {
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = {
                         showDialog.value = false
                         APApplication.uninstallApatch()
                         navigator.navigate(PatchesDestination(PatchesViewModel.PatchMode.UNPATCH))
-                    }) {
-                        Text(text = stringResource(id = R.string.home_dialog_uninstall_all))
-                    }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError
+                    )
+                ) {
+                    Text(text = stringResource(id = R.string.home_dialog_uninstall_all))
                 }
             }
             val dialogWindowProvider = LocalView.current.parent as DialogWindowProvider
@@ -185,12 +229,10 @@ fun UninstallDialog(showDialog: MutableState<Boolean>, navigator: DestinationsNa
 }
 
 @Composable
-fun RebootDropdownItem(@StringRes id: Int, reason: String = "") {
+fun RebootDropdownItem(@StringRes id: Int, reason: String = "", onClick: (() -> Unit)? = null) {
     DropdownMenuItem(text = {
         Text(stringResource(id))
-    }, onClick = {
-        reboot(reason)
-    })
+    }, onClick = onClick ?: { reboot(reason) })
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -213,6 +255,15 @@ private fun TopBar(
         }
 
         if (kpState != APApplication.State.UNKNOWN_STATE) {
+            val downloadTitle = stringResource(id = R.string.reboot_download)
+            val downloadConfirmText = stringResource(id = R.string.reboot_download_confirm)
+            val edlTitle = stringResource(id = R.string.reboot_edl)
+            val edlConfirmText = stringResource(id = R.string.reboot_edl_confirm)
+            var pendingRebootReason by remember { mutableStateOf<String?>(null) }
+            val rebootConfirmDialog = rememberConfirmDialog(onConfirm = {
+                pendingRebootReason?.let { reboot(it) }
+            })
+
             IconButton(onClick = {
                 showDropdownReboot = true
             }) {
@@ -226,10 +277,25 @@ private fun TopBar(
                         showDropdownReboot = false
                     }) {
                         RebootDropdownItem(id = R.string.reboot)
+                        RebootDropdownItem(id = R.string.reboot_soft, reason = "soft_reboot")
                         RebootDropdownItem(id = R.string.reboot_recovery, reason = "recovery")
                         RebootDropdownItem(id = R.string.reboot_bootloader, reason = "bootloader")
-                        RebootDropdownItem(id = R.string.reboot_download, reason = "download")
-                        RebootDropdownItem(id = R.string.reboot_edl, reason = "edl")
+                        // Download/EDL drop the device into flashing modes that look dead
+                        // to a normal user, so they get a confirmation step first.
+                        RebootDropdownItem(id = R.string.reboot_download, onClick = {
+                            showDropdownReboot = false
+                            pendingRebootReason = "download"
+                            rebootConfirmDialog.showConfirm(
+                                title = downloadTitle, content = downloadConfirmText
+                            )
+                        })
+                        RebootDropdownItem(id = R.string.reboot_edl, onClick = {
+                            showDropdownReboot = false
+                            pendingRebootReason = "edl"
+                            rebootConfirmDialog.showConfirm(
+                                title = edlTitle, content = edlConfirmText
+                            )
+                        })
                     }
                 }
             }
@@ -274,12 +340,28 @@ private fun KStatusCard(
         UninstallDialog(showDialog = showUninstallDialog, navigator)
     }
 
-    val cardBackgroundColor = when (kpState) {
-        APApplication.State.KERNELPATCH_INSTALLED -> {
+    // Jailbreak button appears when the kernel is not installed and SELinux is permissive.
+    val isPermissive by produceState(initialValue = false) {
+        value = withContext(Dispatchers.IO) { isSELinuxPermissive() }
+    }
+    // Jailbreak mode is active when the KernelPatch module has been loaded on a
+    // stock kernel (a marker is written by apd late-load).
+    val isJailbreak by produceState(initialValue = false) {
+        value = withContext(Dispatchers.IO) { isJailbreakMode() }
+    }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val jailbreakFailedMsg = stringResource(R.string.settings_jailbreak_failed)
+    val jailbreakTriggeredMsg = stringResource(R.string.jailbreak_triggered)
+
+    val cardBackgroundColor = when {
+        isJailbreak -> MaterialTheme.colorScheme.tertiaryContainer
+
+        kpState == APApplication.State.KERNELPATCH_INSTALLED -> {
             MaterialTheme.colorScheme.primary
         }
 
-        APApplication.State.KERNELPATCH_NEED_UPDATE, APApplication.State.KERNELPATCH_NEED_REBOOT -> {
+        kpState == APApplication.State.KERNELPATCH_NEED_UPDATE || kpState == APApplication.State.KERNELPATCH_NEED_REBOOT -> {
             MaterialTheme.colorScheme.secondary
         }
 
@@ -290,7 +372,7 @@ private fun KStatusCard(
 
     ElevatedCard(
         onClick = {
-            if (kpState != APApplication.State.KERNELPATCH_INSTALLED) {
+            if (!isJailbreak && kpState != APApplication.State.KERNELPATCH_INSTALLED) {
                 navigator.navigate(InstallModeSelectScreenDestination)
             }
         },
@@ -305,7 +387,7 @@ private fun KStatusCard(
                 .padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            if (kpState == APApplication.State.KERNELPATCH_NEED_UPDATE) {
+            if (!isJailbreak && kpState == APApplication.State.KERNELPATCH_NEED_UPDATE) {
                 Row {
                     Text(
                         text = stringResource(R.string.kernel_patch),
@@ -319,12 +401,16 @@ private fun KStatusCard(
                     .padding(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                when (kpState) {
-                    APApplication.State.KERNELPATCH_INSTALLED -> {
+                when {
+                    isJailbreak -> {
+                        Icon(Icons.Filled.LockOpen, stringResource(R.string.settings_jailbreak_mode))
+                    }
+
+                    kpState == APApplication.State.KERNELPATCH_INSTALLED -> {
                         Icon(Icons.Filled.CheckCircle, stringResource(R.string.home_working))
                     }
 
-                    APApplication.State.KERNELPATCH_NEED_UPDATE, APApplication.State.KERNELPATCH_NEED_REBOOT -> {
+                    kpState == APApplication.State.KERNELPATCH_NEED_UPDATE || kpState == APApplication.State.KERNELPATCH_NEED_REBOOT -> {
                         Icon(Icons.Outlined.SystemUpdate, stringResource(R.string.home_need_update))
                     }
 
@@ -337,15 +423,27 @@ private fun KStatusCard(
                         .weight(2f)
                         .padding(start = 16.dp, end = 1.dp)
                 ) {
-                    when (kpState) {
-                        APApplication.State.KERNELPATCH_INSTALLED -> {
+                    when {
+                        isJailbreak -> {
+                            Text(
+                                text = stringResource(R.string.settings_jailbreak_mode),
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            Text(
+                                text = stringResource(R.string.settings_jailbreak_mode_summary),
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+
+                        kpState == APApplication.State.KERNELPATCH_INSTALLED -> {
                             Text(
                                 text = stringResource(R.string.home_working),
                                 style = MaterialTheme.typography.titleMedium
                             )
                         }
 
-                        APApplication.State.KERNELPATCH_NEED_UPDATE, APApplication.State.KERNELPATCH_NEED_REBOOT -> {
+                        kpState == APApplication.State.KERNELPATCH_NEED_UPDATE || kpState == APApplication.State.KERNELPATCH_NEED_REBOOT -> {
                             Text(
                                 text = stringResource(R.string.home_need_update),
                                 style = MaterialTheme.typography.titleMedium
@@ -371,7 +469,7 @@ private fun KStatusCard(
                             )
                         }
                     }
-                    if (kpState != APApplication.State.UNKNOWN_STATE && kpState != APApplication.State.KERNELPATCH_NEED_UPDATE && kpState != APApplication.State.KERNELPATCH_NEED_REBOOT) {
+                    if (!isJailbreak && kpState != APApplication.State.UNKNOWN_STATE && kpState != APApplication.State.KERNELPATCH_NEED_UPDATE && kpState != APApplication.State.KERNELPATCH_NEED_REBOOT) {
                         Spacer(Modifier.height(4.dp))
                         Text(
                             text = "${Version.installedKPVString()} (${managerVersion.second}) - " + if (apState != APApplication.State.ANDROIDPATCH_NOT_INSTALLED) "Full" else "KernelPatch",
@@ -384,12 +482,16 @@ private fun KStatusCard(
                     modifier = Modifier.align(Alignment.CenterVertically)
                 ) {
                     Button(onClick = {
-                        when (kpState) {
-                            APApplication.State.UNKNOWN_STATE -> {
+                        when {
+                            isJailbreak -> {
+                                softReboot()
+                            }
+
+                            kpState == APApplication.State.UNKNOWN_STATE -> {
                                 navigator.navigate(InstallModeSelectScreenDestination)
                             }
 
-                            APApplication.State.KERNELPATCH_NEED_UPDATE -> {
+                            kpState == APApplication.State.KERNELPATCH_NEED_UPDATE -> {
                                 // todo: remove legacy compact for kp < 0.9.0
                                 if (Version.installedKPVUInt() < 0x900u) {
                                     navigator.navigate(PatchesDestination(PatchesViewModel.PatchMode.PATCH_ONLY))
@@ -398,11 +500,11 @@ private fun KStatusCard(
                                 }
                             }
 
-                            APApplication.State.KERNELPATCH_NEED_REBOOT -> {
+                            kpState == APApplication.State.KERNELPATCH_NEED_REBOOT -> {
                                 reboot()
                             }
 
-                            APApplication.State.KERNELPATCH_UNINSTALLING -> {
+                            kpState == APApplication.State.KERNELPATCH_UNINSTALLING -> {
                                 // Do nothing
                             }
 
@@ -415,20 +517,24 @@ private fun KStatusCard(
                             }
                         }
                     }, content = {
-                        when (kpState) {
-                            APApplication.State.UNKNOWN_STATE -> {
+                        when {
+                            isJailbreak -> {
+                                Text(text = stringResource(id = R.string.reboot_soft))
+                            }
+
+                            kpState == APApplication.State.UNKNOWN_STATE -> {
                                 Text(text = stringResource(id = R.string.home_ap_cando_install))
                             }
 
-                            APApplication.State.KERNELPATCH_NEED_UPDATE -> {
+                            kpState == APApplication.State.KERNELPATCH_NEED_UPDATE -> {
                                 Text(text = stringResource(id = R.string.home_ap_cando_update))
                             }
 
-                            APApplication.State.KERNELPATCH_NEED_REBOOT -> {
+                            kpState == APApplication.State.KERNELPATCH_NEED_REBOOT -> {
                                 Text(text = stringResource(id = R.string.home_ap_cando_reboot))
                             }
 
-                            APApplication.State.KERNELPATCH_UNINSTALLING -> {
+                            kpState == APApplication.State.KERNELPATCH_UNINSTALLING -> {
                                 Icon(Icons.Outlined.Cached, contentDescription = "busy")
                             }
 
@@ -437,6 +543,24 @@ private fun KStatusCard(
                             }
                         }
                     })
+
+                    if (kpState == APApplication.State.UNKNOWN_STATE && isPermissive) {
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            scope.launch {
+                                val success = installJailbreak()
+                                if (success) {
+                                    Toast.makeText(context, jailbreakTriggeredMsg, Toast.LENGTH_SHORT)
+                                        .show()
+                                } else {
+                                    Toast.makeText(context, jailbreakFailedMsg, Toast.LENGTH_SHORT)
+                                        .show()
+                                }
+                            }
+                        }, content = {
+                            Text(stringResource(R.string.jailbreak))
+                        })
+                    }
                 }
             }
         }
@@ -665,12 +789,10 @@ private fun InfoCard(kpState: APApplication.State, apState: APApplication.State)
                 .fillMaxWidth()
                 .padding(start = 24.dp, top = 24.dp, end = 24.dp, bottom = 16.dp)
         ) {
-            val contents = StringBuilder()
             val uname = Os.uname()
 
             @Composable
             fun InfoCardItem(label: String, content: String) {
-                contents.appendLine(label).appendLine(content).appendLine()
                 Text(text = label, style = MaterialTheme.typography.bodyLarge)
                 Text(text = content, style = MaterialTheme.typography.bodyMedium)
             }
@@ -736,16 +858,17 @@ fun UpdateCard() {
         val updateDialog = rememberConfirmDialog(onConfirm = { uriHandler.openUri(newVersionUrl) })
         WarningCard(
             message = stringResource(id = R.string.home_new_apatch_found).format(newVersionCode),
-            MaterialTheme.colorScheme.outlineVariant
-        ) {
-            if (changelog.isEmpty()) {
-                uriHandler.openUri(newVersionUrl)
-            } else {
-                updateDialog.showConfirm(
-                    title = title, content = changelog, markdown = true, confirm = updateText
-                )
+            color = MaterialTheme.colorScheme.outlineVariant,
+            onClick = {
+                if (changelog.isEmpty()) {
+                    uriHandler.openUri(newVersionUrl)
+                } else {
+                    updateDialog.showConfirm(
+                        title = title, content = changelog, markdown = true, confirm = updateText
+                    )
+                }
             }
-        }
+        )
     }
 }
 

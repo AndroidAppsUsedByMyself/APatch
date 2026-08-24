@@ -8,9 +8,7 @@ use notify::{
 };
 use signal_hook::{consts::signal::*, iterator::Signals};
 use std::{
-    env,
-    ffi::CStr,
-    fs,
+    env, fs,
     os::unix::{fs::PermissionsExt, process::CommandExt},
     path::{Path, PathBuf},
     process::Command,
@@ -25,21 +23,26 @@ use crate::{
     utils::{self, switch_cgroups},
 };
 
-pub fn report_kernel(superkey: Option<String>, event: &str, state: &str) -> Result<()> {
-    let args = vec![
+pub fn report_kernel(superkey: Option<String>, event: &str, state: &str) {
+    let args = [
         superkey.unwrap_or("su".to_string()),
         "event".to_string(),
         event.to_string(),
         state.to_string(),
     ];
     let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    let _ = utils::run_command("truncate", &args_ref, None)?.wait()?;
-    Ok(())
+    // Best-effort notification to the kernel; a failed report must not abort
+    // boot stages such as post-fs-data.
+    if let Err(e) = utils::run_command("truncate", &args_ref, None)
+        .and_then(|mut child| child.wait().map_err(anyhow::Error::from))
+    {
+        warn!("report kernel event {event}/{state} failed: {e}");
+    }
 }
 
 pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     utils::umask(0);
-    report_kernel(superkey.clone(), "post-fs-data", "before")?;
+    report_kernel(superkey.clone(), "post-fs-data", "before");
     use std::process::Stdio;
     #[cfg(unix)]
     init_load_su_path(&superkey);
@@ -60,7 +63,7 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
 
     if utils::has_magisk() {
         warn!("Magisk detected, skip post-fs-data!");
-        report_kernel(superkey.clone(), "post-fs-data", "after")?;
+        report_kernel(superkey.clone(), "post-fs-data", "after");
         return Ok(());
     }
 
@@ -98,7 +101,6 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         "-f",
         &logcat_path,
         "logcatcher-bootlog:S",
-        "&",
     ];
     let _ = unsafe {
         Command::new("timeout")
@@ -141,6 +143,9 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
         // we should still mount modules.img to `/data/adb/modules` in safe mode
         // becuase we may need to operate the module dir in safe mode
         warn!("safe mode, skip common post-fs-data.d scripts");
+        // Not redundant with the disable below: ensure_binaries /
+        // handle_updated_modules can still fail with `?` before reaching it,
+        // and returning early with modules left enabled risks a bootloop.
         if let Err(e) = module::disable_all_modules() {
             warn!("disable all modules failed: {}", e);
         }
@@ -204,7 +209,7 @@ pub fn on_post_data_fs(superkey: Option<String>) -> Result<()> {
     run_stage("post-mount", superkey.clone(), true);
 
     env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
-    report_kernel(superkey, "post-fs-data", "after")?;
+    report_kernel(superkey, "post-fs-data", "after");
     Ok(())
 }
 
@@ -294,13 +299,11 @@ pub fn start_uid_listener() -> Result<()> {
     {
         let mutex_clone = mutex.clone();
         thread::spawn(move || {
-            let mut signals = Signals::new(&[SIGTERM, SIGINT, SIGPWR]).unwrap();
-            for sig in signals.forever() {
+            let mut signals = Signals::new([SIGTERM, SIGINT, SIGPWR]).unwrap();
+            if let Some(sig) = signals.forever().next() {
                 log::warn!("[shutdown] Caught signal {sig}, refreshing package list...");
-                let skey = CStr::from_bytes_with_nul(b"su\0")
-                    .expect("[shutdown_listener] CStr::from_bytes_with_nul failed");
-                refresh_ap_package_list(&skey, &mutex_clone);
-                break;
+                let skey = c"su";
+                refresh_ap_package_list(skey, &mutex_clone);
             }
         });
     }
@@ -329,18 +332,60 @@ pub fn start_uid_listener() -> Result<()> {
     while let Ok(delayed) = rx.recv() {
         if delayed {
             debounce = false;
-            let skey = CStr::from_bytes_with_nul(b"su\0")
-                .expect("[start_uid_listener] CStr::from_bytes_with_nul failed");
-            refresh_ap_package_list(&skey, &mutex);
-            report_kernel(None, "uid_listener", "package-list-updated").unwrap_or_else(|e| {
-                warn!("Failed to report kernel about package list update: {e}");
-            });
+            let skey = c"su";
+            refresh_ap_package_list(skey, &mutex);
+            report_kernel(None, "uid_listener", "package-list-updated");
         } else if !debounce {
             thread::sleep(Duration::from_secs(1));
             debounce = true;
             tx.send(true)?;
         }
     }
+
+    Ok(())
+}
+
+/// Emulate a system reboot: restart the Android framework (`stop` / `start`)
+/// and re-apply the service stage. Used by jailbreak mode so that a runtime-loaded
+/// `kernelpatch.ko` stays active (a full reboot would drop it).
+pub fn soft_reboot(superkey: Option<String>) -> Result<()> {
+    use std::process::Command;
+
+    // Detach from the caller (app root shell) first: `stop` tears down the
+    // framework including the app/zygote tree this process was spawned from, so
+    // without daemonizing the `start` below would never be reached.
+    utils::daemonize()?;
+
+    info!("emulating soft reboot!");
+    utils::switch_mnt_ns(1)?;
+    std::env::set_current_dir("/").with_context(|| "failed to chdir to /")?;
+
+    if let Err(e) = crate::resetprop::set_prop("sys.boot_completed", "0") {
+        warn!("reset boot completed failed: {e}");
+    }
+
+    info!("stop");
+    let status = Command::new("stop").status().context("stop failed")?;
+    if !status.success() {
+        warn!("stop exited with status: {status}");
+    }
+
+    info!("post-fs-data");
+    // Never abort the soft reboot here: the framework must always be restarted.
+    // The daemonized stdin (dev null) keeps the supercall/truncate redirects from
+    // blocking, so re-applying the boot stages is safe.
+    if let Err(e) = on_post_data_fs(superkey.clone()) {
+        warn!("post-fs-data failed during soft reboot: {e:#}");
+    }
+
+    info!("start");
+    let status = Command::new("start").status().context("start failed")?;
+    if !status.success() {
+        warn!("start exited with status: {status}");
+    }
+
+    info!("services");
+    on_services(superkey)?;
 
     Ok(())
 }
